@@ -13,9 +13,7 @@ from typing import Dict, List, Any
 import streamlit as st
 from PIL import Image
 import streamlit.components.v1 as components
-import importlib
 import image_processor as ip
-importlib.reload(ip)
 
 # Page configuration
 st.set_page_config(
@@ -340,9 +338,11 @@ with tab_studio:
                     orig_w, orig_h = orig_img.size
                     is_small = (orig_w < 350 or orig_h < 300)
 
-                    # 1. Super Upscale
-                    if enable_upscale or is_small:
+                    # 1. Super Upscale (with cloud memory guard)
+                    if (enable_upscale and max(orig_w, orig_h) < 900) or is_small:
                         scale = upscale_factor if enable_upscale else 2.0
+                        if max(orig_w, orig_h) * scale > 1024:
+                            scale = max(1.2, 1024.0 / max(orig_w, orig_h))
                         proc_base = ip.upscale_and_restore_details(
                             orig_img,
                             scale_factor=scale,
@@ -351,7 +351,12 @@ with tab_studio:
                             edge_sharpness=edge_sharpness,
                             clarity_boost=clarity_boost
                         )
-                        upscale_msg = f"{orig_w}x{orig_h} ➔ {proc_base.width}x{proc_base.height} ({scale}x Upscaled)"
+                        upscale_msg = f"{orig_w}x{orig_h} ➔ {proc_base.width}x{proc_base.height} ({scale:.1f}x Upscaled)"
+                    elif max(orig_w, orig_h) > 1024:
+                        ratio = 1024.0 / max(orig_w, orig_h)
+                        nw, nh = int(orig_w * ratio), int(orig_h * ratio)
+                        proc_base = orig_img.resize((nw, nh), Image.Resampling.LANCZOS)
+                        upscale_msg = f"{orig_w}x{orig_h} ➔ {nw}x{nh} (Optimized for LINE)"
                     else:
                         proc_base = orig_img
                         upscale_msg = f"{orig_w}x{orig_h} px"

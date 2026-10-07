@@ -66,16 +66,29 @@ def refine_alpha_edges(
 
 def remove_background(
     image: Image.Image,
-    model_name: str = "isnet-general-use",
+    model_name: str = "u2net",
     alpha_matting: bool = False,
     edge_refine: bool = True,
     **kwargs
 ) -> Image.Image:
     """
     High-precision background removal using IS-Net / U2-Net with edge refinement.
+    Includes memory safety guard to prevent Out-Of-Memory on cloud containers.
     """
     try:
         from rembg import remove
+
+        # Memory safety guard: cap input resolution to 1024px max dimension
+        # LINE sticker canvas is only 370x320px, so 1024px retains 3x high fidelity.
+        max_dim = max(image.width, image.height)
+        if max_dim > 1024:
+            ratio = 1024.0 / max_dim
+            nw = max(2, int(image.width * ratio))
+            nh = max(2, int(image.height * ratio))
+            proc_img = image.resize((nw, nh), Image.Resampling.LANCZOS)
+        else:
+            proc_img = image
+
         session = get_rembg_session(model_name)
         
         # Prepare rembg arguments
@@ -87,9 +100,9 @@ def remove_background(
         } if alpha_matting else {}
 
         if session is False or session is None:
-            result = remove(image, **kwargs)
+            result = remove(proc_img, **kwargs)
         else:
-            result = remove(image, session=session, **kwargs)
+            result = remove(proc_img, session=session, **kwargs)
 
         res_rgba = result.convert("RGBA")
         if edge_refine:
@@ -100,7 +113,7 @@ def remove_background(
         try:
             # Emergency fallback with default rembg
             from rembg import remove
-            res = remove(image).convert("RGBA")
+            res = remove(proc_img if 'proc_img' in locals() else image).convert("RGBA")
             return refine_alpha_edges(res) if edge_refine else res
         except Exception:
             return image.convert("RGBA")
